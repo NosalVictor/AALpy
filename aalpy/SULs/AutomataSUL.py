@@ -1,7 +1,6 @@
 from aalpy.base import Automaton
 from aalpy.base import SUL
 
-
 class AutomatonSUL(SUL):
     def __init__(self, automaton: Automaton):
         super().__init__()
