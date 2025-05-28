@@ -134,3 +134,11 @@ dmypy.json
 
 # PyCharm
 .idea/
+
+# Generated files
+mqtt_connect_model.dot
+mqtt_connect_model_single_output.dot
+output.txt
+output_R.txt
+output_T.txt
+LearnedModels/

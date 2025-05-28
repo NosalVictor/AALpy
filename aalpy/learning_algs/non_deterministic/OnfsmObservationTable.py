@@ -95,6 +95,8 @@ class NonDetObservationTable:
 
         for s in s_set:
             for e in e_set:
+                if self.sul.cache.get_s_e_sampling_frequency(s, e) < self.n_samples:
+                    print("querying missing observations for: ", s, e)
                 while self.sul.cache.get_s_e_sampling_frequency(s, e) < self.n_samples:
                     self.sul.query(s[0] + e)
 

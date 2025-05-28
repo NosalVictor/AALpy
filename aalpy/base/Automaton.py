@@ -155,7 +155,7 @@ class Automaton(ABC, Generic[AutomatonStateType]):
 
     def visualize(self, path='LearnedModel', file_type='pdf', display_same_state_transitions=True):
         from aalpy.utils import visualize_automaton
-        visualize_automaton(self, path, file_type, display_same_state_transitions)
+        visualize_automaton(self, f"LearnedModels/{path}", file_type, display_same_state_transitions)
 
     @staticmethod
     @abstractmethod

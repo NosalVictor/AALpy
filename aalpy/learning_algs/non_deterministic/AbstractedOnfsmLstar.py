@@ -44,6 +44,8 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
         learned abstracted ONFSM
 
     """
+    import sys
+
     start_time = time.time()
     eq_query_time = 0
     learning_rounds = 0
@@ -59,6 +61,7 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
     abstracted_observation_table.update_obs_table()
     new_rows = abstracted_observation_table.update_extended_S()
     abstracted_observation_table.update_obs_table(s_set=new_rows)
+    hyp_nbr = 1
 
     while True:
         learning_rounds += 1
@@ -74,20 +77,32 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
                 # First we add new rows to the S.A. They are added based on the values in the cells of the
                 # rows that is to be closed. Once those rows are created, they are populated and closedness is checked
                 # once again.
+                print("!!! CLOSEDNESS CHECK !!! : ", row_to_close)
                 closed_complete_consistent = False
                 extended_rows = abstracted_observation_table.update_extended_S(row_to_close)
                 abstracted_observation_table.update_obs_table(s_set=extended_rows)
+                print('Observation Table')
+                print_observation_table(abstracted_observation_table.observation_table, 'non-det')
+                print()
                 row_to_close = abstracted_observation_table.get_row_to_close()
 
             row_to_complete = abstracted_observation_table.get_row_to_complete()
             while row_to_complete is not None:
                 closed_complete_consistent = False
                 abstracted_observation_table.extend_S_dot_A([row_to_complete])
+                print("row_to_complete", row_to_complete)
                 abstracted_observation_table.update_obs_table(s_set=[row_to_complete])
+                print('Observation Table')
+                print_observation_table(abstracted_observation_table.observation_table, 'non-det')
+                print()
+                print('Abstracted Observation Table')
+                # CHANGED, but not important to alg
+                print_observation_table(abstracted_observation_table, 'abstracted-non-det')
                 row_to_complete = abstracted_observation_table.get_row_to_complete()
 
             e_column_for_consistency = abstracted_observation_table.get_row_to_make_consistent()
             while e_column_for_consistency is not None:
+                print("!!! CONSISTENCY CHECK !!!")
                 closed_complete_consistent = False
                 extended_col = abstracted_observation_table.update_E(e_column_for_consistency)
                 abstracted_observation_table.update_obs_table(e_set=extended_col)
@@ -95,14 +110,23 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
 
         abstracted_observation_table.clean_tables()
         hypothesis = abstracted_observation_table.gen_hypothesis()
+        hypothesis.visualize(f"LearnedModel_{hyp_nbr}")
+        hyp_nbr += 1
 
         if print_level == 3:
-            print('Observation Table')
-            print_observation_table(abstracted_observation_table.observation_table, 'non-det')
-            print()
-            print('Abstracted Observation Table')
-            # CHANGED, but not important to alg
-            print_observation_table(abstracted_observation_table, 'abstracted-non-det')
+            o = sys.stdout
+
+            with open('output.txt', 'w') as f:
+                sys.stdout = f
+
+                print('Observation Table')
+                print_observation_table(abstracted_observation_table.observation_table, 'non-det')
+                print()
+                print('Abstracted Observation Table')
+                # CHANGED, but not important to alg
+                print_observation_table(abstracted_observation_table, 'abstracted-non-det')
+
+            sys.stdout = o
 
         if print_level > 1:
             print(f'Hypothesis {learning_rounds} has {len(hypothesis.states)} states.')
