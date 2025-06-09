@@ -73,7 +73,11 @@ class AbstractedNonDetObservationTable:
             for s in update_S:
                 for e in update_E:
                     print("s : ", s, " + e: ", e)
-                    for o_tup in self.get_all_outputs(s, e):
+                    all_outputs = self.get_all_outputs(s, e)
+                    if len(all_outputs) == 0:
+                        self.observation_table.query_missing_observations([s], [e])
+                        all_outputs = self.get_all_outputs(s, e)
+                    for o_tup in all_outputs:
                         print("222 s : ", s, " + e: ", e)
                         abstracted_outputs = []
                         o_tup = tuple([o_tup])

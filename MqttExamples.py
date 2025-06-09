@@ -1,97 +1,13 @@
+import time
+
 import paho.mqtt.client as mqtt_client
 import random
 from aalpy.base import SUL
 
-class HiveMQ_Mapper_Con_Discon_Sub_UnSub(SUL):
-    def __init__(self, broker='localhost', port=1883):
-        super().__init__()
-        self.clients = ['c0', 'c1']
-        self.broker = broker
-        self.port = port
-
-        self.client_list = {}
-        self.connected_clients_id = set()
-        self.subscribed_clients_id = set()
-
-    def get_input_alphabet(self):
-        return ['connect', 'disconnect', 'subscribe', 'unsubscribe']
-
-    def pre(self):
-        for client_id in self.clients:
-            client = mqtt_client.Client(client_id=client_id, reconnect_on_failure=False,
-                                        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
-            client.loop_start()
-            self.client_list[client_id] = client
-
-    def post(self):
-        for client in self.client_list.values():
-            client.disconnect(self.broker, self.port)
-            client.loop_stop()
-        self.client_list = {}
-        self.connected_clients_id = set()
-        self.subscribed_clients_id = set()
-
-    def step(self, letter):
-        client_id = random.choice(self.clients)
-        client = self.client_list[client_id]
-        output = 'Letter Error'
-        all_out = ''
-
-        if letter == 'connect':
-            response = client.connect(self.broker, self.port)
-            if client_id not in self.connected_clients_id:
-                self.connected_clients_id.add(client_id)
-            output = self.return_output(response, "connect")
-            print("client", client_id, "connected, output: ", output)
-
-        elif letter == 'disconnect':
-            response = client.disconnect(self.broker, self.port)
-            if client_id in self.connected_clients_id:
-                self.connected_clients_id.remove(client_id)
-            output = self.return_output(response, "disconnect")
-
-            if output == 'CONCLOSED' and len(self.connected_clients_id) == 0:
-                all_out = '_ALL'
-            print("client", client_id, "disconnected, output: ", output+all_out)
-
-        elif letter == 'subscribe':
-            response = client.subscribe("python/mqtt")
-            if client_id not in self.subscribed_clients_id:
-                self.subscribed_clients_id.add(client_id)
-            output = self.return_output(response[0], "subscribe")
-            print("client", client_id, "subscribed, output: ", output)
-
-        elif letter == 'unsubscribe':
-            response = client.unsubscribe("python/mqtt")
-            if client_id in self.subscribed_clients_id:
-                self.subscribed_clients_id.remove(client_id)
-            output = self.return_output(response[0], "unsubscribe")
-
-            if output == 'UNSUBACK' and len(self.subscribed_clients_id) == 0:
-                all_out = '_ALL'
-            print("client", client_id, "unsubscribed, output: ", output+all_out)
-
-        return output + all_out
-
-    def return_output(self, code, input):
-        if code == 0:
-            if input == "connect":
-                return 'CONNACK'
-            elif input == "disconnect":
-                return 'CONCLOSED'
-            elif input == "subscribe":
-                return 'SUBACK'
-            elif input == "unsubscribe":
-                return 'UNSUBACK'
-            else:
-                return 'ERROR'
-        else:
-            return 'ERROR'
-
 class HiveMQ_Mapper_Con_Discon(SUL):
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
-        self.clients = ['c0', 'c1', 'c2', 'c3', 'c4']
+        self.clients = ['c0', 'c1']
         self.broker = broker
         self.port = port
 
@@ -114,6 +30,9 @@ class HiveMQ_Mapper_Con_Discon(SUL):
             client.loop_stop()
         self.client_list = {}
         self.connected_clients_id = set()
+
+    #def on_connect(self, client, userdata, flags, rc):
+
 
     def step(self, letter):
         client_id = random.choice(self.clients)
@@ -149,24 +68,128 @@ class HiveMQ_Mapper_Con_Discon(SUL):
         else:
             return 'ERROR'
 
+class HiveMQ_Mapper(SUL):
+    import socket
+    socket.setdefaulttimeout(5)
+
+    def __init__(self, broker='localhost', port=1883):
+        super().__init__()
+        self.clients = ['c0', 'c1']
+        self.broker = broker
+        self.port = port
+
+        self.client_list = {}
+        self.connected_clients_id = set()
+        self.subscribed_clients_id = set()
+
+    def get_input_alphabet(self):
+        return ['connect', 'disconnect', 'subscribe', 'unsubscribe', 'publish']
+
+    def pre(self):
+        for client_id in self.clients:
+            client = mqtt_client.Client(client_id=client_id, reconnect_on_failure=False,
+                                        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
+            client.loop_start()
+            self.client_list[client_id] = client
+
+    def post(self):
+        for client in self.client_list.values():
+            client.disconnect()
+            client.loop_stop()
+        self.client_list = {}
+        self.connected_clients_id = set()
+        self.subscribed_clients_id = set()
+        time.sleep(0.01)
+
+    def step(self, letter):
+        client_id = random.choice(self.clients)
+        client = self.client_list[client_id]
+        topic = "python/mqtt"
+        output = 'Letter Error'
+        all_out = ''
+
+        if letter == 'connect':
+            response = client.connect(self.broker, self.port)
+            if client_id not in self.connected_clients_id:
+                self.connected_clients_id.add(client_id)
+            output = self.return_output(response, "connect")
+            #print("client", client_id, "connected, output: ", output)
+
+        elif letter == 'disconnect':
+            response = client.disconnect()
+            if client_id in self.connected_clients_id:
+                self.connected_clients_id.remove(client_id)
+                if client_id in self.subscribed_clients_id:
+                    self.subscribed_clients_id.remove(client_id)
+                    if len(self.subscribed_clients_id) == 0:
+                        all_out = '_UNSUB_ALL'
+            output = self.return_output(response, "disconnect")
+
+            if output == 'CONCLOSED' and len(self.connected_clients_id) == 0:
+                all_out = '_ALL'
+            #print("client", client_id, "disconnected, output: ", output+all_out)
+
+        elif letter == 'subscribe':
+            response = client.subscribe(topic)
+            if client_id in self.connected_clients_id and client_id not in self.subscribed_clients_id:
+                self.subscribed_clients_id.add(client_id)
+            output = self.return_output(response[0], "subscribe")
+            print("client", client_id, "subscribed, output: ", output)
+
+        elif letter == 'unsubscribe':
+            response = client.unsubscribe(topic)
+            if client_id in self.subscribed_clients_id:
+                self.subscribed_clients_id.remove(client_id)
+            output = self.return_output(response[0], "unsubscribe")
+
+            if output == 'UNSUBACK' and len(self.subscribed_clients_id) == 0:
+                all_out = '_ALL'
+            print("client", client_id, "unsubscribed, output: ", output)
+
+        elif letter == 'publish':
+            response = client.publish(topic, "Test message")
+            output = self.return_output(response.rc, "publish")
+            print("client", client_id, "published, output: ", output)
+            time.sleep(0.05)
+
+        return output + all_out
+
+    def return_output(self, code, input):
+        if code == 0:
+            if input == "connect":
+                return 'CONNACK'
+            elif input == "disconnect":
+                return 'CONCLOSED'
+            elif input == "subscribe":
+                return 'SUBACK'
+            elif input == "unsubscribe":
+                return 'UNSUBACK'
+            elif input == "publish":
+                return 'PUBACK'
+            else:
+                return 'ERROR'
+        else:
+            return 'ERROR'
+
 def mqtt_real_example():
     from aalpy.oracles import RandomWalkEqOracle
     from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
 
-    sul = HiveMQ_Mapper_Con_Discon_Sub_UnSub()
+    sul = HiveMQ_Mapper()
 
     alphabet = sul.get_input_alphabet()
     eq_oracle = RandomWalkEqOracle(alphabet, sul, num_steps=1000, reset_prob=0.09, reset_after_cex=True)
 
-    abstraction_mapping = {
+    abstraction_mapping = { # Needs to be consistent with the Mapper
         'CONCLOSED': 'CONCLOSED',
         'CONCLOSED_ALL': 'CONCLOSED',
+        'CONCLOSED_UNSUB_ALL': 'CONCLOSED',
         'UNSUBACK': 'UNSUBACK',
         'UNSUBACK_ALL': 'UNSUBACK'
     }
 
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-                                               n_sampling=50, print_level=3)
+                                               n_sampling=20, print_level=3)
     learned_onfsm.visualize()
 
 def mqtt_connect_model_single_output():
@@ -422,19 +445,21 @@ def mqtt_connect_all_model():
 
     abstraction_mapping = {
         'CONCLOSED': 'CONCLOSED',
-        'CONCLOSED_ALL': 'CONCLOSED'
+        'CONCLOSED_ALL': 'CONCLOSED',
+        'CONNACK': 'CONNACK',
+        'CONNACK_ALL': 'CONNACK'
     }
 
-    import sys
-    o_temp = sys.stdout
-    with open('output_R.txt', 'w') as f:
-        sys.stdout = f
-        learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-                                               n_sampling=50, print_level=3)
-    sys.stdout = o_temp
-
-    #learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
+    #import sys
+    #o_temp = sys.stdout
+    #with open('output_R.txt', 'w') as f:
+    #    sys.stdout = f
+    #    learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
     #                                           n_sampling=50, print_level=3)
+    #sys.stdout = o_temp
+
+    learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
+                                               n_sampling=50, print_level=3)
     #learned_onfsm.visualize()
     return learned_onfsm
 
