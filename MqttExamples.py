@@ -5,6 +5,9 @@ import random
 from aalpy.base import SUL
 
 class HiveMQ_Mapper_Con_Discon(SUL):
+    import socket
+    socket.setdefaulttimeout(5)
+
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
         self.clients = ['c0', 'c1']
@@ -12,6 +15,7 @@ class HiveMQ_Mapper_Con_Discon(SUL):
         self.port = port
 
         self.client_list = {}
+        self.clients_in_loop = set()
         self.connected_clients_id = set()
 
     def get_input_alphabet(self):
@@ -19,38 +23,51 @@ class HiveMQ_Mapper_Con_Discon(SUL):
 
     def pre(self):
         for client_id in self.clients:
-            client = mqtt_client.Client(client_id=client_id, reconnect_on_failure=False,
+            client = mqtt_client.Client(client_id=client_id,
                                         callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
-            client.loop_start()
             self.client_list[client_id] = client
 
     def post(self):
-        for client in self.client_list.values():
-            client.disconnect(self.broker, self.port)
-            client.loop_stop()
+        for client_id in self.clients_in_loop:
+            self.client_list[client_id].disconnect()
+            self.client_list[client_id].loop_stop()
         self.client_list = {}
         self.connected_clients_id = set()
-
-    #def on_connect(self, client, userdata, flags, rc):
-
+        self.clients_in_loop = set()
+        time.sleep(0.01)
 
     def step(self, letter):
         client_id = random.choice(self.clients)
+        if client_id not in self.clients_in_loop:
+            self.client_list[client_id].loop_start()
+            self.clients_in_loop.add(client_id)
         client = self.client_list[client_id]
         output = 'Letter Error'
         all_out = ''
 
         if letter == 'connect':
+            print(f"Is client connected : {client_id} : {client.is_connected()}")
             response = client.connect(self.broker, self.port)
             if client_id not in self.connected_clients_id:
                 self.connected_clients_id.add(client_id)
+            timeout = 5
+            start_time = time.time()
+            while not client.is_connected():
+                print(f"waiting for connect {client_id}")
+                time.sleep(0.5)
+                if time.time() - start_time > timeout:
+                    print(f"Timeout reached for client {client_id}")
+                    break
             output = self.return_output(response, True)
             print("client", client_id, "connected, output: ", output)
 
         elif letter == 'disconnect':
-            response = client.disconnect(self.broker, self.port)
+            response = client.disconnect()
             if client_id in self.connected_clients_id:
                 self.connected_clients_id.remove(client_id)
+            while client.is_connected():
+                print(f"waiting for disconnect {client_id}")
+                time.sleep(0.5)
             output = self.return_output(response, False)
 
             if output == 'CONCLOSED' and len(self.connected_clients_id) == 0:
@@ -175,21 +192,18 @@ def mqtt_real_example():
     from aalpy.oracles import RandomWalkEqOracle
     from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
 
-    sul = HiveMQ_Mapper()
+    sul = HiveMQ_Mapper_Con_Discon()
 
     alphabet = sul.get_input_alphabet()
     eq_oracle = RandomWalkEqOracle(alphabet, sul, num_steps=1000, reset_prob=0.09, reset_after_cex=True)
 
     abstraction_mapping = { # Needs to be consistent with the Mapper
         'CONCLOSED': 'CONCLOSED',
-        'CONCLOSED_ALL': 'CONCLOSED',
-        'CONCLOSED_UNSUB_ALL': 'CONCLOSED',
-        'UNSUBACK': 'UNSUBACK',
-        'UNSUBACK_ALL': 'UNSUBACK'
+        'CONCLOSED_ALL': 'CONCLOSED'
     }
 
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-                                               n_sampling=20, print_level=3)
+                                               n_sampling=10, print_level=3)
     learned_onfsm.visualize()
 
 def mqtt_connect_model_single_output():
@@ -611,4 +625,5 @@ def not_working_onfsm_2_clients_with_dot():
     learned_onfsm.visualize()
     return learned_onfsm
 
-mqtt_real_example()
+if __name__ == '__main__':
+    mqtt_real_example()
