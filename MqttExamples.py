@@ -1,3 +1,4 @@
+import threading
 import time
 
 import paho.mqtt.client as mqtt_client
@@ -5,9 +6,6 @@ import random
 from aalpy.base import SUL
 
 class HiveMQ_Mapper_Con_Discon(SUL):
-    import socket
-    socket.setdefaulttimeout(5)
-
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
         self.clients = ['c0', 'c1']
@@ -15,64 +13,93 @@ class HiveMQ_Mapper_Con_Discon(SUL):
         self.port = port
 
         self.client_list = {}
+        self.connect_event_list = {}
+        self.disconnect_event_list = {}
         self.clients_in_loop = set()
         self.connected_clients_id = set()
+        self.connect_timeout_counter = 0
+        self.disconnect_timeout_counter = 0
 
     def get_input_alphabet(self):
         return ['connect', 'disconnect']
 
+    def make_client(self, client_id):
+        client = mqtt_client.Client(client_id=client_id, callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
+        client.on_connect = self.on_connect
+        client.on_disconnect = self.on_disconnect
+        self.client_list[client_id] = client
+
+    def on_connect(self, client, userdata, flags, rc, properties):
+        print("SET UP : ", client._client_id.decode())
+        self.disconnect_event_list[client._client_id.decode()].clear()
+        self.connect_event_list[client._client_id.decode()].set()
+        self.connect_event_list[client._client_id.decode()].clear()
+
+    def on_disconnect(self, client, userdata, mid, reason_code_list, properties):
+        if not self.disconnect_event_list[client._client_id.decode()].is_set():
+            self.disconnect_event_list[client._client_id.decode()].set()
+            print("DISCO SET UP : ", client._client_id.decode())
+        else:
+            print("DISCO ALREADY SET : ", client._client_id.decode())
+
     def pre(self):
         for client_id in self.clients:
-            client = mqtt_client.Client(client_id=client_id,
-                                        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
-            self.client_list[client_id] = client
+            self.make_client(client_id)
+            self.connect_event_list[client_id] = threading.Event()
+            self.disconnect_event_list[client_id] = threading.Event()
 
     def post(self):
         for client_id in self.clients_in_loop:
             self.client_list[client_id].disconnect()
             self.client_list[client_id].loop_stop()
         self.client_list = {}
+        self.connect_event_list = {}
+        self.disconnect_event_list = {}
         self.connected_clients_id = set()
         self.clients_in_loop = set()
-        time.sleep(0.01)
+        print("=================== connect :", self.connect_timeout_counter, "=================== disconnect :",
+              self.disconnect_timeout_counter, "===================")
 
     def step(self, letter):
         client_id = random.choice(self.clients)
-        if client_id not in self.clients_in_loop:
-            self.client_list[client_id].loop_start()
-            self.clients_in_loop.add(client_id)
+        if self.client_list[client_id] is None:
+            self.make_client(client_id)
         client = self.client_list[client_id]
+        if client_id not in self.clients_in_loop:
+            client.loop_start()
+            self.clients_in_loop.add(client_id)
         output = 'Letter Error'
         all_out = ''
 
         if letter == 'connect':
-            print(f"Is client connected : {client_id} : {client.is_connected()}")
+            print(f"Is {client_id} connected : {client.is_connected()}")
             response = client.connect(self.broker, self.port)
             if client_id not in self.connected_clients_id:
                 self.connected_clients_id.add(client_id)
-            timeout = 5
-            start_time = time.time()
-            while not client.is_connected():
-                print(f"waiting for connect {client_id}")
-                time.sleep(0.5)
-                if time.time() - start_time > timeout:
-                    print(f"Timeout reached for client {client_id}")
-                    break
+            no_timeout = self.connect_event_list[client_id].wait(timeout=3)
+            if not no_timeout:
+                print("TIMEOUT CONNECT : ", client_id)
+                self.connect_timeout_counter += 1
+            print(client_id, "connected")
             output = self.return_output(response, True)
-            print("client", client_id, "connected, output: ", output)
 
         elif letter == 'disconnect':
             response = client.disconnect()
             if client_id in self.connected_clients_id:
                 self.connected_clients_id.remove(client_id)
-            while client.is_connected():
-                print(f"waiting for disconnect {client_id}")
-                time.sleep(0.5)
+                no_timeout = self.disconnect_event_list[client_id].wait(timeout=3)
+                if not no_timeout:
+                    print("TIMEOUT DISCONNECT : ", client_id)
+                    self.disconnect_timeout_counter += 1
+                print("CLEARED : ", client_id)
+            self.client_list[client_id].loop_stop()
+            self.clients_in_loop.remove(client_id)
+            self.client_list[client_id] = None
             output = self.return_output(response, False)
 
             if output == 'CONCLOSED' and len(self.connected_clients_id) == 0:
                 all_out = '_ALL'
-            print("client", client_id, "disconnected, output: ", output+all_out)
+            print(client_id, "disconnected, output: ", output+all_out)
 
         return output + all_out
 
