@@ -1,118 +1,156 @@
-import threading
-import time
-
-import paho.mqtt.client as mqtt_client
+import socket
 import random
+import select
+
+from scapy.compat import raw
+from scapy.contrib.mqtt import MQTT, MQTTConnect, MQTTDisconnect
 from aalpy.base import SUL
 
 class HiveMQ_Mapper_Con_Discon(SUL):
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
-        self.clients = ['c0', 'c1']
-        self.broker = broker
-        self.port = port
+        self.server_address = (broker, port)
 
-        self.client_list = {}
-        self.connect_event_list = {}
-        self.disconnect_event_list = {}
-        self.clients_in_loop = set()
+        self.clients = ['c0', 'c1', 'c2']
+        self.clients_socket = {}
+        self.clients_set_up = set()
         self.connected_clients_id = set()
-        self.connect_timeout_counter = 0
-        self.disconnect_timeout_counter = 0
 
     def get_input_alphabet(self):
         return ['connect', 'disconnect']
 
-    def make_client(self, client_id):
-        client = mqtt_client.Client(client_id=client_id, callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
-        client.on_connect = self.on_connect
-        client.on_disconnect = self.on_disconnect
-        self.client_list[client_id] = client
-
-    def on_connect(self, client, userdata, flags, rc, properties):
-        print("SET UP : ", client._client_id.decode())
-        self.disconnect_event_list[client._client_id.decode()].clear()
-        self.connect_event_list[client._client_id.decode()].set()
-        self.connect_event_list[client._client_id.decode()].clear()
-
-    def on_disconnect(self, client, userdata, mid, reason_code_list, properties):
-        if not self.disconnect_event_list[client._client_id.decode()].is_set():
-            self.disconnect_event_list[client._client_id.decode()].set()
-            print("DISCO SET UP : ", client._client_id.decode())
-        else:
-            print("DISCO ALREADY SET : ", client._client_id.decode())
-
     def pre(self):
-        for client_id in self.clients:
-            self.make_client(client_id)
-            self.connect_event_list[client_id] = threading.Event()
-            self.disconnect_event_list[client_id] = threading.Event()
+        pass
 
     def post(self):
-        for client_id in self.clients_in_loop:
-            self.client_list[client_id].disconnect()
-            self.client_list[client_id].loop_stop()
-        self.client_list = {}
-        self.connect_event_list = {}
-        self.disconnect_event_list = {}
+        for client_id in self.clients_socket:
+            self.clients_socket[client_id].close()
+        self.clients_socket = {}
+        self.clients_set_up = set()
         self.connected_clients_id = set()
-        self.clients_in_loop = set()
-        print("=================== connect :", self.connect_timeout_counter, "=================== disconnect :",
-              self.disconnect_timeout_counter, "===================")
+        print("===============================================")
 
     def step(self, letter):
         client_id = random.choice(self.clients)
-        if self.client_list[client_id] is None:
-            self.make_client(client_id)
-        client = self.client_list[client_id]
-        if client_id not in self.clients_in_loop:
-            client.loop_start()
-            self.clients_in_loop.add(client_id)
-        output = 'Letter Error'
+        if client_id not in self.clients_set_up:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(self.server_address)
+            self.clients_socket[client_id] = s
+            self.clients_set_up.add(client_id)
+        sock = self.clients_socket[client_id]
+
+        data= b'Error'
         all_out = ''
 
         if letter == 'connect':
-            print(f"Is {client_id} connected : {client.is_connected()}")
-            response = client.connect(self.broker, self.port)
-            if client_id not in self.connected_clients_id:
-                self.connected_clients_id.add(client_id)
-            no_timeout = self.connect_event_list[client_id].wait(timeout=3)
-            if not no_timeout:
-                print("TIMEOUT CONNECT : ", client_id)
-                self.connect_timeout_counter += 1
-            print(client_id, "connected")
-            output = self.return_output(response, True)
+            mqtt_connect = MQTT()
+            mqtt_connect.add_payload(MQTTConnect(clientId=client_id, protolevel=4, protoname='MQTT'))
+            sock.sendall(raw(mqtt_connect))
+            data = sock.recv(4)
 
         elif letter == 'disconnect':
-            response = client.disconnect()
+            mqtt_disconnect = MQTT()
+            mqtt_disconnect.add_payload(MQTTDisconnect())
+            sock.sendall(raw(mqtt_disconnect))
+
+            ready, _, _ = select.select([sock], [], [], 0.1)
+            if ready:
+                data = sock.recv(4)
+            else:
+                data = b''
+
+        output = self.return_output(data)
+        if output == 'CONNACK' and client_id not in self.connected_clients_id:
+            self.connected_clients_id.add(client_id)
+        elif output == 'CONCLOSED':
+            self.close_socket(client_id)
             if client_id in self.connected_clients_id:
                 self.connected_clients_id.remove(client_id)
-                no_timeout = self.disconnect_event_list[client_id].wait(timeout=3)
-                if not no_timeout:
-                    print("TIMEOUT DISCONNECT : ", client_id)
-                    self.disconnect_timeout_counter += 1
-                print("CLEARED : ", client_id)
-            self.client_list[client_id].loop_stop()
-            self.clients_in_loop.remove(client_id)
-            self.client_list[client_id] = None
-            output = self.return_output(response, False)
+                if len(self.connected_clients_id) == 0:
+                    all_out = '_ALL'
 
-            if output == 'CONCLOSED' and len(self.connected_clients_id) == 0:
-                all_out = '_ALL'
-            print(client_id, "disconnected, output: ", output+all_out)
-
+        print(client_id, letter, " : ", output+all_out)
         return output + all_out
 
-    def return_output(self, code, is_connect):
-        if code == 0:
-            if is_connect:
-                return 'CONNACK'
-            else:
-                return 'CONCLOSED'
-        else:
-            return 'ERROR'
+    def close_socket(self, client_id):
+        self.clients_socket[client_id].close()
+        self.clients_socket.pop(client_id)
+        self.clients_set_up.remove(client_id)
 
-class HiveMQ_Mapper(SUL):
+    def return_output(self, data):
+        if data == b'':
+            return "CONCLOSED"
+        elif data[0] == 0x20 and data[1] == 0x02:
+            return "CONNACK"
+        else:
+            return "ERROR"
+
+class HiveMQ_Mapper_Connect(SUL):
+    def __init__(self, broker='localhost', port=1883):
+        super().__init__()
+        self.server_address = (broker, port)
+
+        self.clients = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6']
+        self.clients_socket = {}
+        self.clients_set_up = set()
+        self.connected_clients_id = set()
+
+    def get_input_alphabet(self):
+        return ['connect']
+
+    def pre(self):
+        pass
+
+    def post(self):
+        for client_id in self.clients_socket:
+            self.clients_socket[client_id].close()
+        self.clients_socket = {}
+        self.clients_set_up = set()
+        self.connected_clients_id = set()
+        print("===============================================")
+
+    def step(self, letter):
+        client_id = random.choice(self.clients)
+        if client_id not in self.clients_set_up:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(self.server_address)
+            self.clients_socket[client_id] = s
+            self.clients_set_up.add(client_id)
+        sock = self.clients_socket[client_id]
+        all_out = ''
+
+        mqtt_connect = MQTT()
+        mqtt_connect.add_payload(MQTTConnect(clientId=client_id, protolevel=4, protoname='MQTT'))
+        sock.sendall(raw(mqtt_connect))
+        data = sock.recv(4)
+
+        output = self.return_output(data)
+        if output == 'CONNACK' and client_id not in self.connected_clients_id:
+            self.connected_clients_id.add(client_id)
+        elif output == 'CONCLOSED':
+            self.close_socket(client_id)
+            if client_id in self.connected_clients_id:
+                self.connected_clients_id.remove(client_id)
+                if len(self.connected_clients_id) == 0:
+                    all_out = '_ALL'
+
+        print(client_id, output+all_out)
+        return output + all_out
+
+    def close_socket(self, client_id):
+        self.clients_socket[client_id].close()
+        self.clients_socket.pop(client_id)
+        self.clients_set_up.remove(client_id)
+
+    def return_output(self, data):
+        if data == b'':
+            return "CONCLOSED"
+        elif data[0] == 0x20 and data[1] == 0x02:
+            return "CONNACK"
+        else:
+            return "ERROR"
+
+"""class HiveMQ_Mapper(SUL):
     import socket
     socket.setdefaulttimeout(5)
 
@@ -213,7 +251,7 @@ class HiveMQ_Mapper(SUL):
             else:
                 return 'ERROR'
         else:
-            return 'ERROR'
+            return 'ERROR'"""
 
 def mqtt_real_example():
     from aalpy.oracles import RandomWalkEqOracle
