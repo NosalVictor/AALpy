@@ -151,108 +151,84 @@ class HiveMQ_Mapper_Connect(SUL):
             return "ERROR"
 
 """class HiveMQ_Mapper(SUL):
-    import socket
-    socket.setdefaulttimeout(5)
-
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
-        self.clients = ['c0', 'c1']
-        self.broker = broker
-        self.port = port
+        self.server_address = (broker, port)
 
-        self.client_list = {}
+        self.clients = ['c0', 'c1']
+        self.clients_socket = {}
+        self.clients_set_up = set()
         self.connected_clients_id = set()
-        self.subscribed_clients_id = set()
 
     def get_input_alphabet(self):
-        return ['connect', 'disconnect', 'subscribe', 'unsubscribe', 'publish']
+        return ['connect', 'subscribe', 'unsubscribe', 'publish']
 
     def pre(self):
-        for client_id in self.clients:
-            client = mqtt_client.Client(client_id=client_id, reconnect_on_failure=False,
-                                        callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2)
-            client.loop_start()
-            self.client_list[client_id] = client
+        pass
 
     def post(self):
-        for client in self.client_list.values():
-            client.disconnect()
-            client.loop_stop()
-        self.client_list = {}
+        for client_id in self.clients_socket:
+            self.clients_socket[client_id].close()
+        self.clients_socket = {}
+        self.clients_set_up = set()
         self.connected_clients_id = set()
-        self.subscribed_clients_id = set()
-        time.sleep(0.01)
+        print("===============================================")
 
     def step(self, letter):
         client_id = random.choice(self.clients)
-        client = self.client_list[client_id]
-        topic = "python/mqtt"
-        output = 'Letter Error'
+        if client_id not in self.clients_set_up:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(self.server_address)
+            self.clients_socket[client_id] = s
+            self.clients_set_up.add(client_id)
+        sock = self.clients_socket[client_id]
+
+        data= b'Error'
         all_out = ''
 
         if letter == 'connect':
-            response = client.connect(self.broker, self.port)
-            if client_id not in self.connected_clients_id:
-                self.connected_clients_id.add(client_id)
-            output = self.return_output(response, "connect")
-            #print("client", client_id, "connected, output: ", output)
+            mqtt_connect = MQTT()
+            mqtt_connect.add_payload(MQTTConnect(clientId=client_id, protolevel=4, protoname='MQTT'))
+            sock.sendall(raw(mqtt_connect))
+            data = sock.recv(4)
 
         elif letter == 'disconnect':
-            response = client.disconnect()
+            mqtt_disconnect = MQTT()
+            mqtt_disconnect.add_payload(MQTTDisconnect())
+            sock.sendall(raw(mqtt_disconnect))
+
+            ready, _, _ = select.select([sock], [], [], 0.1)
+            if ready:
+                data = sock.recv(4)
+            else:
+                data = b''
+
+        output = self.return_output(data)
+        if output == 'CONNACK' and client_id not in self.connected_clients_id:
+            self.connected_clients_id.add(client_id)
+        elif output == 'CONCLOSED':
+            self.close_socket(client_id)
             if client_id in self.connected_clients_id:
                 self.connected_clients_id.remove(client_id)
-                if client_id in self.subscribed_clients_id:
-                    self.subscribed_clients_id.remove(client_id)
-                    if len(self.subscribed_clients_id) == 0:
-                        all_out = '_UNSUB_ALL'
-            output = self.return_output(response, "disconnect")
+                if len(self.connected_clients_id) == 0:
+                    all_out = '_ALL'
 
-            if output == 'CONCLOSED' and len(self.connected_clients_id) == 0:
-                all_out = '_ALL'
-            #print("client", client_id, "disconnected, output: ", output+all_out)
-
-        elif letter == 'subscribe':
-            response = client.subscribe(topic)
-            if client_id in self.connected_clients_id and client_id not in self.subscribed_clients_id:
-                self.subscribed_clients_id.add(client_id)
-            output = self.return_output(response[0], "subscribe")
-            print("client", client_id, "subscribed, output: ", output)
-
-        elif letter == 'unsubscribe':
-            response = client.unsubscribe(topic)
-            if client_id in self.subscribed_clients_id:
-                self.subscribed_clients_id.remove(client_id)
-            output = self.return_output(response[0], "unsubscribe")
-
-            if output == 'UNSUBACK' and len(self.subscribed_clients_id) == 0:
-                all_out = '_ALL'
-            print("client", client_id, "unsubscribed, output: ", output)
-
-        elif letter == 'publish':
-            response = client.publish(topic, "Test message")
-            output = self.return_output(response.rc, "publish")
-            print("client", client_id, "published, output: ", output)
-            time.sleep(0.05)
-
+        print(client_id, letter, " : ", output+all_out)
         return output + all_out
 
-    def return_output(self, code, input):
-        if code == 0:
-            if input == "connect":
-                return 'CONNACK'
-            elif input == "disconnect":
-                return 'CONCLOSED'
-            elif input == "subscribe":
-                return 'SUBACK'
-            elif input == "unsubscribe":
-                return 'UNSUBACK'
-            elif input == "publish":
-                return 'PUBACK'
-            else:
-                return 'ERROR'
-        else:
-            return 'ERROR'"""
+    def close_socket(self, client_id):
+        self.clients_socket[client_id].close()
+        self.clients_socket.pop(client_id)
+        self.clients_set_up.remove(client_id)
 
+    def return_output(self, data):
+        if data == b'':
+            return "CONCLOSED"
+        elif data[0] == 0x20 and data[1] == 0x02:
+            return "CONNACK"
+        else:
+            return "ERROR"
+"""
 def mqtt_real_example():
     from aalpy.oracles import RandomWalkEqOracle
     from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
