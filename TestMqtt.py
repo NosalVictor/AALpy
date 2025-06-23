@@ -28,7 +28,7 @@ def send_disconnect(sock):
 
     ready, _, _ = select.select([sock], [], [], 0.1)
     if ready:
-        response = sock.recv(4)
+        response = sock.recv(20)
     else:
         response = b''
 
@@ -69,7 +69,7 @@ def send_unsubscribe(sock):
 
 def send_publish(sock):
     mqtt_pub = mqtt.MQTT(QOS=1)
-    mqtt_pub.add_payload(mqtt.MQTTPublish(topic="test", msgid=1, value="Test Messageooooooooooooooooooooooooooooooooooo"))
+    mqtt_pub.add_payload(mqtt.MQTTPublish(topic="test", msgid=1, value="Test Message"))
     sock.sendall(raw(mqtt_pub))
     print("c0 sent PUBLISH : ", raw(mqtt_pub).hex())
 
@@ -82,8 +82,9 @@ def send_publish(sock):
         print("Réponse inattendue :", response.hex())
 
 def receive_publish(ready, sock):
+    print("Ready is : ", ready)
     if ready:
-        response = sock.recv(1024)
+        response = sock.recv(20)
         sock_port = sock.getsockname()
         if response == b'':
             print(sock_port, " : CONCLOSED reçu")
@@ -123,23 +124,16 @@ def connect_publish(sock):
     send_connect(sock, 'c0')
     send_publish(sock)
 
-def connect_subscribe_publish_wait(sock):
+def connect_subscribe_publish_receive(sock):
     send_connect(sock, 'c0')
     send_subscribe(sock)
     send_publish(sock)
 
-    ready, _, _ = select.select([sock], [], [], 1)
-    if ready:
-        response = sock.recv(1024)
-        if response == b'':
-            print("CONCLOSED reçu")
-        elif response[0] == 0x30:
-            print("PUBLISH reçu : ", response.hex())
-        else:
-            print("Réponse inattendue :", response.hex())
+    ready, _, _ = select.select([sock], [], [], 0.1)
+    receive_publish(ready, sock)
 
 def multi_clients_publish_receive(sock):
-    clients = ['c0', 'c1', 'c2']
+    clients = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9']
     sockets  = {'c0': sock}
     for client in clients[1:]:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -155,7 +149,7 @@ def multi_clients_publish_receive(sock):
 
     for client in clients:
         sock = sockets[client]
-        ready, _, _ = select.select([sock], [], [], 1)
+        ready, _, _ = select.select([sock], [], [], 0.1)
         receive_publish(ready, sock)
         if client != 'c0':
             sock.close()

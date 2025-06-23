@@ -141,6 +141,13 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
 
         if print_level >= 2:
             print('Counterexample', cex)
+            o = sys.stdout
+
+            with open('cex.txt', 'w') as f:
+                sys.stdout = f
+                print("counterexample:", cex)
+
+            sys.stdout = o
 
         # Process counterexample -> add cex to S.A or E
         abstracted_observation_table.cex_processing(cex, hypothesis)

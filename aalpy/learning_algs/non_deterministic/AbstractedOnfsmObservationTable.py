@@ -1,3 +1,4 @@
+import sys
 from collections import defaultdict
 
 from aalpy.automata import Onfsm, OnfsmState
@@ -418,6 +419,16 @@ class AbstractedNonDetObservationTable:
                 break
 
         if equivalent_output:
+            o = sys.stdout
+
+            with open('SDotA.txt', 'w') as f:
+                sys.stdout = f
+
+                print("equivalent output found, adding prefixes to S_dot_A")
+                print("possible outputs: ", possible_outputs)
+                print("cex output: ", cex[1][cex_len - 1])
+
+            sys.stdout = o
             print("equivalent output found, adding prefixes to S_dot_A")
             print("possible outputs: ", possible_outputs)
             print("cex output: ", cex[1][cex_len - 1])
@@ -443,6 +454,16 @@ class AbstractedNonDetObservationTable:
                 added_suffix = extend_set(self.E, [suffix])
                 if len(added_suffix) > 0:
                     print("ADDED SUFFIX: ", added_suffix)
+
+                    o = sys.stdout
+                    with open('E.txt', 'w') as f:
+                        sys.stdout = f
+                        print("equivalent output found, adding prefixes to S_dot_A")
+                        print("possible outputs: ", possible_outputs)
+                        print("cex output: ", cex[1][cex_len - 1])
+                        print("ADDED SUFFIX: ", added_suffix)
+                    sys.stdout = o
+
                     self.update_obs_table(s_set=self.S_dot_A, e_set=added_suffix)
                     if self.get_row_to_close(displacement_included=False) is not None:
                         break

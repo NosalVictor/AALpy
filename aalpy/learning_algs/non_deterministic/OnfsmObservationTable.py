@@ -98,7 +98,9 @@ class NonDetObservationTable:
                 if self.sul.cache.get_s_e_sampling_frequency(s, e) < self.n_samples:
                     print("querying missing observations for: ", s, e)
                 while self.sul.cache.get_s_e_sampling_frequency(s, e) < self.n_samples:
+                    print("Before query freq:", self.sul.cache.get_s_e_sampling_frequency(s, e))
                     self.sul.query(s[0] + e)
+                    print("After query freq:", self.sul.cache.get_s_e_sampling_frequency(s, e))
 
     def row_to_hashable(self, row_prefix):
         """
