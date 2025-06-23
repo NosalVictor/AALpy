@@ -258,7 +258,7 @@ class HiveMQ_Mapper(SUL):
         mqtt_pub = mqtt.MQTT(QOS=1)
         mqtt_pub.add_payload(mqtt.MQTTPublish(topic="test", msgid=1, value="Test Message"))
         sock.sendall(raw(mqtt_pub))
-        return sock.recv(24)
+        return sock.recv(2)
 
     def handle_publish(self, data, sock):
         output = "PUBACK"
@@ -268,7 +268,8 @@ class HiveMQ_Mapper(SUL):
             output = "CONCLOSED"
 
         elif data[0] == 0x40:
-            if (len(data) > 4 and data[4] == 0x30) or self.is_publish_received():
+            sock.recv(2)
+            if self.is_publish_received():
                 suffix = '_PUBLISH'
 
         elif data[0] == 0x30:
@@ -281,8 +282,9 @@ class HiveMQ_Mapper(SUL):
 
             sys.stdout = o
 
-            publish_length = 2 + data[1]
-            if (len(data) > publish_length and data[publish_length] == 0x40) or self.is_puback_received(data, sock):
+            sock.recv(data[1])
+            data = sock.recv(4)
+            if data != b'' and data[0] == 0x40:
                 suffix = '_PUBLISH'
             else:
                output = "ERROR"
@@ -301,6 +303,8 @@ class HiveMQ_Mapper(SUL):
         return output, suffix
 
     def is_publish_received(self):
+        is_publish_received = False
+
         for client in self.clients:
             if client not in self.clients_set_up:
                 self.set_up_socket(client)
@@ -309,27 +313,9 @@ class HiveMQ_Mapper(SUL):
             if ready:
                 response = sock.recv(20)
                 if response != b'' and response[0] == 0x30:
-                    return True
+                    is_publish_received = True
 
-        return False
-
-    def is_puback_received(self, data, sock):
-        ready, _, _ = select.select([sock], [], [], 0.1)
-        if ready:
-            response = sock.recv(4)
-            if response != b'' and response[0] == 0x40:
-                return True
-            else:
-                o = sys.stdout
-
-                with open('error_publish.txt', 'w') as f:
-                    sys.stdout = f
-                    print("Data:", data)
-                    print("Data hex:", data.hex())
-
-                sys.stdout = o
-
-        return False
+        return is_publish_received
 
     def close_socket(self, client_id):
         self.clients_socket[client_id].close()
