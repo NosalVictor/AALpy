@@ -62,12 +62,21 @@ def _add_transition_to_graph(graph, state, automaton_type, display_same_state_tr
                 continue
             graph.add_edge(Edge(state.state_id, new_state.state_id, label=_wrap_label(f'{i}/{state.output_fun[i]}')))
     if automaton_type == 'onfsm':
+        loop_transitions = []
         for i in state.transitions.keys():
             new_state = state.transitions[i]
             for s in new_state:
+
                 if not display_same_state_trans and state.state_id == s[1].state_id:
                     continue
-                graph.add_edge(Edge(state.state_id, s[1].state_id, label=_wrap_label(f'{i}/{s[0]}')))
+                if state.state_id == s[1].state_id:
+                    loop_transitions.append(f'{i}/{s[0]}')
+                else:
+                    graph.add_edge(Edge(state.state_id, s[1].state_id, label=_wrap_label(f'{i}/{s[0]}')))
+
+        if loop_transitions:
+            label = _wrap_label(', '.join(loop_transitions))
+            graph.add_edge(Edge(state.state_id, state.state_id, label=label))
     if automaton_type == 'ndmoore':
         for i in state.transitions.keys():
             new_states = state.transitions[i]

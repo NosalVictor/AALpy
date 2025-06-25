@@ -370,7 +370,7 @@ def mqtt_real_example():
     }
 
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-                                               n_sampling=20, print_level=3)
+                                               n_sampling=30, print_level=3)
     learned_onfsm.visualize()
 
 def mqtt_connect_model_single_output():
