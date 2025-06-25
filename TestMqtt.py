@@ -14,11 +14,11 @@ def send_connect(sock, client_id):
 
     response = sock.recv(4)
     if response == b'':
-        print("CONCLOSED reçu")
+        print("CONCLOSED received")
     elif response[0] == 0x20 and response[1] == 0x02:
-        print("CONNACK reçu")
+        print("CONNACK received")
     else:
-        print("Réponse inattendue :", response.hex())
+        print("Unexpected response :", response.hex())
 
 def send_disconnect(sock):
     mqtt_disconnect = mqtt.MQTT()
@@ -33,24 +33,24 @@ def send_disconnect(sock):
         response = b''
 
     if response == b'':
-        print("CONCLOSED reçu")
+        print("CONCLOSED received")
     else:
-        print("Réponse inattendue :", response.hex())
+        print("Unexpected response :", response.hex())
 
-def send_subscribe(sock):
+def send_subscribe(sock, client_id):
     mqtt_sub = mqtt.MQTT(QOS=1)
     topic = mqtt.MQTTTopicQOS(topic="test")
     mqtt_sub.add_payload(mqtt.MQTTSubscribe(msgid=1, topics=[topic]))
     sock.sendall(raw(mqtt_sub))
-    print("c0 sent SUBSCRIBE : ", raw(mqtt_sub).hex())
+    print(client_id, " sent SUBSCRIBE : ", raw(mqtt_sub).hex())
 
     response = sock.recv(5)
     if response == b'':
-        print("CONCLOSED reçu")
+        print("CONCLOSED received")
     elif response[0] == 0x90:
-        print("SUBACK reçu")
+        print("SUBACK received")
     else:
-        print("Réponse inattendue :", response.hex())
+        print("Unexpected response :", response.hex())
 
 def send_unsubscribe(sock):
     mqtt_unsub = mqtt.MQTT(QOS=1)
@@ -61,11 +61,11 @@ def send_unsubscribe(sock):
 
     response = sock.recv(4)
     if response == b'':
-        print("CONCLOSED reçu")
+        print("CONCLOSED received")
     elif response[0] == 0xb0:
-        print("UNSUBACK reçu")
+        print("UNSUBACK received")
     else:
-        print("Réponse inattendue :", response.hex())
+        print("Unexpected response :", response.hex())
 
 def send_publish(sock):
     mqtt_pub = mqtt.MQTT(QOS=1)
@@ -75,11 +75,11 @@ def send_publish(sock):
 
     response = sock.recv(4)
     if response == b'':
-        print("CONCLOSED reçu")
+        print("CONCLOSED received")
     elif response[0] == 0x40:
-        print("PUBACK reçu")
+        print("PUBACK received")
     else:
-        print("Réponse inattendue :", response.hex())
+        print("Unexpected response :", response.hex())
 
 def receive_publish(ready, sock):
     print("Ready is : ", ready)
@@ -87,11 +87,11 @@ def receive_publish(ready, sock):
         response = sock.recv(20)
         sock_port = sock.getsockname()
         if response == b'':
-            print(sock_port, " : CONCLOSED reçu")
+            print(sock_port, " : CONCLOSED received")
         elif response[0] == 0x30:
-            print(sock_port, " : PUBLISH reçu : ", response.hex())
+            print(sock_port, " : PUBLISH received : ", response.hex())
         else:
-            print(sock_port, " : Réponse inattendue :", response.hex())
+            print(sock_port, " : Unexpected response :", response.hex())
 
 def reset_socket(sock):
     sock.close()
@@ -117,7 +117,7 @@ def connect_disconnect_connect(sock):
 
 def connect_subscribe_unsubscribe(sock):
     send_connect(sock, 'c0')
-    send_subscribe(sock)
+    send_subscribe(sock, 'c0')
     send_unsubscribe(sock)
 
 def connect_publish(sock):
@@ -126,7 +126,7 @@ def connect_publish(sock):
 
 def connect_subscribe_publish_receive(sock):
     send_connect(sock, 'c0')
-    send_subscribe(sock)
+    send_subscribe(sock, 'c0')
     send_publish(sock)
 
     ready, _, _ = select.select([sock], [], [], 0.1)
@@ -143,8 +143,8 @@ def multi_clients_publish_receive(sock):
     for client in clients:
         send_connect(sockets[client], client)
 
-    send_subscribe(sockets['c0'])
-    send_subscribe(sockets['c1'])
+    send_subscribe(sockets['c0'], 'c0')
+    send_subscribe(sockets['c1'], 'c1')
     send_publish(sockets['c0'])
 
     for client in clients:
@@ -154,8 +154,45 @@ def multi_clients_publish_receive(sock):
         if client != 'c0':
             sock.close()
 
+def publish_first_with_other_client_sub(sock0):
+    sock1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock1.connect(server_address)
+
+    send_connect(sock0, 'c0')
+    send_subscribe(sock0, 'c0')
+    send_connect(sock1, 'c1')
+    send_subscribe(sock1, 'c1')
+
+    mqtt_pub = mqtt.MQTT(QOS=1)
+    mqtt_pub.add_payload(mqtt.MQTTPublish(topic="test", msgid=1, value="Test Message"))
+    sock0.sendall(raw(mqtt_pub))
+    print("c0 sent PUBLISH")
+
+    ready, _, _ = select.select([sock0], [], [], 0.1)
+    if ready:
+        data = sock0.recv(2)
+        if data[0] == 0x30:
+            print("PUBLISH received FIRST")
+            mqtt_connect = mqtt.MQTT()
+            mqtt_connect.add_payload(mqtt.MQTTConnect(clientId='c1', protolevel=4, protoname='MQTT', cleansess=1))
+            sock1.sendall(raw(mqtt_connect))
+            print("c1 sent CONNECT")
+
+            response = sock1.recv(2)
+            if response == b'':
+                print("CONCLOSED received")
+            elif response[0] == 0x30:
+                return True
+
+    sock1.close()
+    return False
+
 if __name__ == "__main__":
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(server_address)
-    multi_clients_publish_receive(s)
-    s.close()
+    bug_found = False
+    while not bug_found:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(server_address)
+        bug_found = publish_first_with_other_client_sub(s)
+        s.close()
+        print("==============================================")
+    print("Bug Found : Forgot to read PUBLISH")

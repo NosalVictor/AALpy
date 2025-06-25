@@ -156,7 +156,7 @@ class HiveMQ_Mapper(SUL):
         super().__init__()
         self.server_address = (broker, port)
 
-        self.clients = ('c0', 'c1', 'c2')
+        self.clients = ('c0', 'c1', 'c2', 'c3')
         self.clients_socket = {}
         self.clients_set_up = set()
         self.connected_clients_id = set()
@@ -199,7 +199,7 @@ class HiveMQ_Mapper(SUL):
             elif letter == 'unsubscribe':
                 data = self.send_unsubscribe(sock)
 
-            output = self.return_output(data)
+            output = self.return_output(data, letter)
 
         if output == 'CONNACK' and client_id not in self.connected_clients_id:
             self.connected_clients_id.add(client_id)
@@ -286,8 +286,17 @@ class HiveMQ_Mapper(SUL):
             data = sock.recv(4)
             if data != b'' and data[0] == 0x40:
                 suffix = '_PUBLISH'
+                self.is_publish_received() # Make sure publish of each client is read
             else:
-               output = "ERROR"
+                o = sys.stdout
+
+                with open('error_publish_puback.txt', 'w') as f:
+                    sys.stdout = f
+                    print("Data:", data)
+                    print("Data hex:", data.hex())
+
+                sys.stdout = o
+                output = "ERROR"
 
         else:
             o = sys.stdout
@@ -322,7 +331,7 @@ class HiveMQ_Mapper(SUL):
         self.clients_socket.pop(client_id)
         self.clients_set_up.remove(client_id)
 
-    def return_output(self, data):
+    def return_output(self, data, letter):
         if data == b'':
             return "CONCLOSED"
         elif data[0] == 0x20 and data[1] == 0x02:
@@ -338,6 +347,7 @@ class HiveMQ_Mapper(SUL):
                 sys.stdout = f
                 print("Data:", data)
                 print("Data hex:", data.hex())
+                print("Letter:", letter)
 
             sys.stdout = o
             return "ERROR"
@@ -360,7 +370,7 @@ def mqtt_real_example():
     }
 
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-                                               n_sampling=10, print_level=3)
+                                               n_sampling=20, print_level=3)
     learned_onfsm.visualize()
 
 def mqtt_connect_model_single_output():
