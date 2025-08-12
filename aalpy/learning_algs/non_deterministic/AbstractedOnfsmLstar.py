@@ -77,7 +77,6 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
                 # First we add new rows to the S.A. They are added based on the values in the cells of the
                 # rows that is to be closed. Once those rows are created, they are populated and closedness is checked
                 # once again.
-                print("!!! CLOSEDNESS CHECK !!! : ", row_to_close)
                 closed_complete_consistent = False
                 extended_rows = abstracted_observation_table.update_extended_S(row_to_close)
                 abstracted_observation_table.update_obs_table(s_set=extended_rows)
@@ -90,7 +89,6 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
             while row_to_complete is not None:
                 closed_complete_consistent = False
                 abstracted_observation_table.extend_S_dot_A([row_to_complete])
-                print("row_to_complete", row_to_complete)
                 abstracted_observation_table.update_obs_table(s_set=[row_to_complete])
                 print('Observation Table')
                 print_observation_table(abstracted_observation_table.observation_table, 'non-det')
@@ -102,7 +100,6 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
 
             e_column_for_consistency = abstracted_observation_table.get_row_to_make_consistent()
             while e_column_for_consistency is not None:
-                print("!!! CONSISTENCY CHECK !!!")
                 closed_complete_consistent = False
                 extended_col = abstracted_observation_table.update_E(e_column_for_consistency)
                 abstracted_observation_table.update_obs_table(e_set=extended_col)
@@ -110,13 +107,13 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
 
         abstracted_observation_table.clean_tables()
         hypothesis = abstracted_observation_table.gen_hypothesis()
-        hypothesis.visualize(f"LearnedModel_{hyp_nbr}")
+        hypothesis.visualize(f"LearnedModel_{hyp_nbr}") #Print each intermediate hypothesis
         hyp_nbr += 1
 
         if print_level == 3:
             o = sys.stdout
 
-            with open('output.txt', 'w') as f:
+            with open('output_tables.txt', 'w') as f:
                 sys.stdout = f
 
                 print('Observation Table')
@@ -138,16 +135,6 @@ def run_abstracted_ONFSM_Lstar(alphabet: list, sul: SUL, eq_oracle: Oracle, abst
 
         if cex is None:
             break
-
-        if print_level >= 2:
-            print('Counterexample', cex)
-            o = sys.stdout
-
-            with open('cex.txt', 'w') as f:
-                sys.stdout = f
-                print("counterexample:", cex)
-
-            sys.stdout = o
 
         # Process counterexample -> add cex to S.A or E
         abstracted_observation_table.cex_processing(cex, hypothesis)

@@ -7,7 +7,230 @@ from scapy.compat import raw
 from scapy.contrib import mqtt
 from aalpy.base import SUL
 
-class HiveMQ_Mapper_Con_Discon(SUL):
+class HiveMQ_Mapper(SUL): #Main Mapper
+    def __init__(self, broker='localhost', port=1883):
+        super().__init__()
+        self.server_address = (broker, port)
+
+        self.clients = ('c0', 'c1', 'c2') #Set the number of clients
+        self.clients_socket = {}
+        self.clients_set_up = set() #Set of clients currently owning a socket
+        self.connected_clients_id = set()
+        self.subscribed_clients_id = set()
+
+    def get_input_alphabet(self):
+        return ['connect', 'subscribe', 'unsubscribe', 'publish']
+
+    def pre(self): #Before each input sequence
+        pass
+
+    def post(self): #After each input sequence
+        for client_id in self.clients_socket:
+            self.clients_socket[client_id].close()
+        self.clients_socket = {}
+        self.clients_set_up = set()
+        self.connected_clients_id = set()
+        self.subscribed_clients_id = set()
+        print("===============================================")
+
+    def step(self, letter): #For each input symbol
+        client_id = random.choice(self.clients)
+        if client_id not in self.clients_set_up:
+            self.set_up_socket(client_id)
+        sock = self.clients_socket[client_id]
+
+        data= b'Error'
+        suffix = ''
+
+        if letter == 'publish':
+            data = self.send_publish(sock)
+            output, suffix = self.handle_publish(data, sock)
+        else:
+            if letter == 'connect':
+                data = self.send_connect(sock, client_id)
+
+            elif letter == 'subscribe':
+                data = self.send_subscribe(sock)
+
+            elif letter == 'unsubscribe':
+                data = self.send_unsubscribe(sock)
+
+            output = self.return_output(data, letter)
+
+        if output == 'CONNACK' and client_id not in self.connected_clients_id:
+            self.connected_clients_id.add(client_id)
+        elif output == 'CONCLOSED':
+            self.close_socket(client_id)
+            if client_id in self.connected_clients_id:
+                self.connected_clients_id.remove(client_id)
+                if client_id in self.subscribed_clients_id:
+                    self.subscribed_clients_id.remove(client_id)
+                if len(self.subscribed_clients_id) == 0:
+                    suffix = '_UNSUB_ALL'
+            if len(self.connected_clients_id) == 0:
+                suffix = '_ALL'
+        elif output == 'SUBACK' and client_id not in self.subscribed_clients_id:
+            self.subscribed_clients_id.add(client_id)
+        elif output == 'UNSUBACK':
+            if client_id in self.subscribed_clients_id:
+                self.subscribed_clients_id.remove(client_id)
+            if len(self.subscribed_clients_id) == 0:
+                suffix = '_ALL'
+
+        print(client_id, letter, " : ", output+suffix)
+        return output + suffix
+
+    def set_up_socket(self, client_id):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(self.server_address)
+        self.clients_socket[client_id] = s
+        self.clients_set_up.add(client_id)
+
+    def send_connect(self, sock, client_id):
+        mqtt_connect = mqtt.MQTT()
+        mqtt_connect.add_payload(mqtt.MQTTConnect(clientId=client_id, protolevel=4, protoname='MQTT', cleansess=1))
+        sock.sendall(raw(mqtt_connect))
+        return sock.recv(4)
+
+    def send_subscribe(self, sock):
+        mqtt_sub = mqtt.MQTT(QOS=1)
+        topic = mqtt.MQTTTopicQOS(topic="test")
+        mqtt_sub.add_payload(mqtt.MQTTSubscribe(msgid=1, topics=[topic]))
+        sock.sendall(raw(mqtt_sub))
+        return sock.recv(5)
+
+    def send_unsubscribe(self, sock):
+        mqtt_unsub = mqtt.MQTT(QOS=1)
+        topic = mqtt.MQTTTopic(topic="test")
+        mqtt_unsub.add_payload(mqtt.MQTTUnsubscribe(msgid=1, topics=[topic]))
+        sock.sendall(raw(mqtt_unsub))
+        ready, _, _ = select.select([sock], [], [], 0.1) #Unsubscribe timeout
+        if ready:
+            return sock.recv(4)
+        else:
+            return b''
+
+    def send_publish(self, sock):
+        mqtt_pub = mqtt.MQTT(QOS=1)
+        mqtt_pub.add_payload(mqtt.MQTTPublish(topic="test", msgid=1, value="Test Message"))
+        sock.sendall(raw(mqtt_pub))
+        return sock.recv(2)
+
+    def handle_publish(self, data, sock):
+        output = "PUBACK"
+        suffix = ''
+
+        if data == b'':
+            output = "CONCLOSED"
+
+        elif data[0] == 0x40: #PUBACK received
+            sock.recv(2)
+            if self.is_publish_received():
+                suffix = '_PUBLISH'
+
+        elif data[0] == 0x30: #PUBLISH received
+            sock.recv(data[1])
+            data = sock.recv(4)
+            if data != b'' and data[0] == 0x40:
+                suffix = '_PUBLISH'
+                #Ensures that each PUBLISH is read, avoid future reading of old PUBLISH
+                self.is_publish_received()
+            else:
+                #For debug purposes
+                o = sys.stdout
+                with open('error_publish_puback.txt', 'w') as f:
+                    sys.stdout = f
+                    print("Data:", data)
+                    print("Data hex:", data.hex())
+                sys.stdout = o
+                output = "ERROR"
+
+        else:
+            #For debug purposes
+            o = sys.stdout
+            with open('error_publish.txt', 'w') as f:
+                sys.stdout = f
+                print("Data:", data)
+                print("Data hex:", data.hex())
+            sys.stdout = o
+            output = "ERROR"
+
+        return output, suffix
+
+    def is_publish_received(self):
+        is_publish_received = False
+
+        for client in self.clients:
+            if client not in self.clients_set_up:
+                self.set_up_socket(client)
+            sock = self.clients_socket[client]
+            ready, _, _ = select.select([sock], [], [], 0.1) #Timeout for publish received
+            if ready:
+                response = sock.recv(20)
+                if response != b'' and response[0] == 0x30:
+                    is_publish_received = True
+
+        return is_publish_received
+
+    def close_socket(self, client_id):
+        self.clients_socket[client_id].close()
+        self.clients_socket.pop(client_id)
+        self.clients_set_up.remove(client_id)
+
+    def return_output(self, data, letter):
+        if data == b'':
+            return "CONCLOSED"
+        elif data[0] == 0x20 and data[1] == 0x02:
+            return "CONNACK"
+        elif data[0] == 0x90:
+            return "SUBACK"
+        elif data[0] == 0xb0:
+            return "UNSUBACK"
+        else:
+            #For debug purposes
+            o = sys.stdout
+            with open('error.txt', 'w') as f:
+                sys.stdout = f
+                print("Data:", data)
+                print("Data hex:", data.hex())
+                print("Letter:", letter)
+            sys.stdout = o
+            return "ERROR"
+
+def mqtt_real_example(): #Main function to run the learning algorithm
+    from aalpy.oracles import RandomWalkEqOracle
+    from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
+
+    sul = HiveMQ_Mapper()
+
+    alphabet = sul.get_input_alphabet()
+    #Conformance testing algorithm
+    eq_oracle = RandomWalkEqOracle(alphabet, sul, num_steps=1000, reset_prob=0.09, reset_after_cex=True)
+
+    abstraction_mapping = { #Needs to be consistent with the Mapper
+        'CONCLOSED': 'CONCLOSED',
+        'CONCLOSED_UNSUB_ALL': 'CONCLOSED',
+        'CONCLOSED_ALL': 'CONCLOSED',
+        'UNSUBACK': 'UNSUBACK',
+        'UNSUBACK_ALL': 'UNSUBACK'
+    }
+
+    # Only (dis)connect abstraction mapping
+    #abstraction_mapping = {
+    #    'CONCLOSED': 'CONCLOSED',
+    #    'CONCLOSED_ALL': 'CONCLOSED'
+    #}
+
+    #Learning algorithm
+    learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
+                                               n_sampling=21, print_level=3)
+    learned_onfsm.visualize()
+
+#############################################################################################
+# From here on, the mappers and functions have been used for testing throughout development #
+#############################################################################################
+
+class HiveMQ_Mapper_Con_Discon(SUL): #Mapper for connect and disconnect only
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
         self.server_address = (broker, port)
@@ -86,7 +309,7 @@ class HiveMQ_Mapper_Con_Discon(SUL):
         else:
             return "ERROR"
 
-class HiveMQ_Mapper_Connect(SUL):
+class HiveMQ_Mapper_Connect(SUL): #Mapper for connect only
     def __init__(self, broker='localhost', port=1883):
         super().__init__()
         self.server_address = (broker, port)
@@ -151,228 +374,6 @@ class HiveMQ_Mapper_Connect(SUL):
         else:
             return "ERROR"
 
-class HiveMQ_Mapper(SUL):
-    def __init__(self, broker='localhost', port=1883):
-        super().__init__()
-        self.server_address = (broker, port)
-
-        self.clients = ('c0', 'c1', 'c2', 'c3')
-        self.clients_socket = {}
-        self.clients_set_up = set()
-        self.connected_clients_id = set()
-        self.subscribed_clients_id = set()
-
-    def get_input_alphabet(self):
-        return ['connect', 'subscribe', 'unsubscribe', 'publish']
-
-    def pre(self):
-        pass
-
-    def post(self):
-        for client_id in self.clients_socket:
-            self.clients_socket[client_id].close()
-        self.clients_socket = {}
-        self.clients_set_up = set()
-        self.connected_clients_id = set()
-        self.subscribed_clients_id = set()
-        print("===============================================")
-
-    def step(self, letter):
-        client_id = random.choice(self.clients)
-        if client_id not in self.clients_set_up:
-            self.set_up_socket(client_id)
-        sock = self.clients_socket[client_id]
-
-        data= b'Error'
-        suffix = ''
-
-        if letter == 'publish':
-            data = self.send_publish(sock)
-            output, suffix = self.handle_publish(data, sock)
-        else:
-            if letter == 'connect':
-                data = self.send_connect(sock, client_id)
-
-            elif letter == 'subscribe':
-                data = self.send_subscribe(sock)
-
-            elif letter == 'unsubscribe':
-                data = self.send_unsubscribe(sock)
-
-            output = self.return_output(data, letter)
-
-        if output == 'CONNACK' and client_id not in self.connected_clients_id:
-            self.connected_clients_id.add(client_id)
-        elif output == 'CONCLOSED':
-            self.close_socket(client_id)
-            if client_id in self.connected_clients_id:
-                self.connected_clients_id.remove(client_id)
-                if client_id in self.subscribed_clients_id:
-                    self.subscribed_clients_id.remove(client_id)
-                if len(self.subscribed_clients_id) == 0:
-                    suffix = '_UNSUB_ALL'
-            if len(self.connected_clients_id) == 0:
-                suffix = '_ALL'
-        elif output == 'SUBACK' and client_id not in self.subscribed_clients_id:
-            self.subscribed_clients_id.add(client_id)
-        elif output == 'UNSUBACK':
-            if client_id in self.subscribed_clients_id:
-                self.subscribed_clients_id.remove(client_id)
-            if len(self.subscribed_clients_id) == 0:
-                suffix = '_ALL'
-
-        print(client_id, letter, " : ", output+suffix)
-        return output + suffix
-
-    def set_up_socket(self, client_id):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(self.server_address)
-        self.clients_socket[client_id] = s
-        self.clients_set_up.add(client_id)
-
-    def send_connect(self, sock, client_id):
-        mqtt_connect = mqtt.MQTT()
-        mqtt_connect.add_payload(mqtt.MQTTConnect(clientId=client_id, protolevel=4, protoname='MQTT', cleansess=1))
-        sock.sendall(raw(mqtt_connect))
-        return sock.recv(4)
-
-    def send_subscribe(self, sock):
-        mqtt_sub = mqtt.MQTT(QOS=1)
-        topic = mqtt.MQTTTopicQOS(topic="test")
-        mqtt_sub.add_payload(mqtt.MQTTSubscribe(msgid=1, topics=[topic]))
-        sock.sendall(raw(mqtt_sub))
-        return sock.recv(5)
-
-    def send_unsubscribe(self, sock):
-        mqtt_unsub = mqtt.MQTT(QOS=1)
-        topic = mqtt.MQTTTopic(topic="test")
-        mqtt_unsub.add_payload(mqtt.MQTTUnsubscribe(msgid=1, topics=[topic]))
-        sock.sendall(raw(mqtt_unsub))
-        ready, _, _ = select.select([sock], [], [], 0.1)
-        if ready:
-            return sock.recv(4)
-        else:
-            return b''
-
-    def send_publish(self, sock):
-        mqtt_pub = mqtt.MQTT(QOS=1)
-        mqtt_pub.add_payload(mqtt.MQTTPublish(topic="test", msgid=1, value="Test Message"))
-        sock.sendall(raw(mqtt_pub))
-        return sock.recv(2)
-
-    def handle_publish(self, data, sock):
-        output = "PUBACK"
-        suffix = ''
-
-        if data == b'':
-            output = "CONCLOSED"
-
-        elif data[0] == 0x40:
-            sock.recv(2)
-            if self.is_publish_received():
-                suffix = '_PUBLISH'
-
-        elif data[0] == 0x30:
-            o = sys.stdout
-
-            with open('publish_first.txt', 'w') as f:
-                sys.stdout = f
-                print("Data:", data)
-                print("Data hex:", data.hex())
-
-            sys.stdout = o
-
-            sock.recv(data[1])
-            data = sock.recv(4)
-            if data != b'' and data[0] == 0x40:
-                suffix = '_PUBLISH'
-                self.is_publish_received() # Make sure publish of each client is read
-            else:
-                o = sys.stdout
-
-                with open('error_publish_puback.txt', 'w') as f:
-                    sys.stdout = f
-                    print("Data:", data)
-                    print("Data hex:", data.hex())
-
-                sys.stdout = o
-                output = "ERROR"
-
-        else:
-            o = sys.stdout
-
-            with open('error_publish.txt', 'w') as f:
-                sys.stdout = f
-                print("Data:", data)
-                print("Data hex:", data.hex())
-
-            sys.stdout = o
-            output = "ERROR"
-
-        return output, suffix
-
-    def is_publish_received(self):
-        is_publish_received = False
-
-        for client in self.clients:
-            if client not in self.clients_set_up:
-                self.set_up_socket(client)
-            sock = self.clients_socket[client]
-            ready, _, _ = select.select([sock], [], [], 0.1)
-            if ready:
-                response = sock.recv(20)
-                if response != b'' and response[0] == 0x30:
-                    is_publish_received = True
-
-        return is_publish_received
-
-    def close_socket(self, client_id):
-        self.clients_socket[client_id].close()
-        self.clients_socket.pop(client_id)
-        self.clients_set_up.remove(client_id)
-
-    def return_output(self, data, letter):
-        if data == b'':
-            return "CONCLOSED"
-        elif data[0] == 0x20 and data[1] == 0x02:
-            return "CONNACK"
-        elif data[0] == 0x90:
-            return "SUBACK"
-        elif data[0] == 0xb0:
-            return "UNSUBACK"
-        else:
-            o = sys.stdout
-
-            with open('error.txt', 'w') as f:
-                sys.stdout = f
-                print("Data:", data)
-                print("Data hex:", data.hex())
-                print("Letter:", letter)
-
-            sys.stdout = o
-            return "ERROR"
-
-def mqtt_real_example():
-    from aalpy.oracles import RandomWalkEqOracle
-    from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
-
-    sul = HiveMQ_Mapper()
-
-    alphabet = sul.get_input_alphabet()
-    eq_oracle = RandomWalkEqOracle(alphabet, sul, num_steps=1000, reset_prob=0.09, reset_after_cex=True)
-
-    abstraction_mapping = { # Needs to be consistent with the Mapper
-        'CONCLOSED': 'CONCLOSED',
-        'CONCLOSED_UNSUB_ALL': 'CONCLOSED',
-        'CONCLOSED_ALL': 'CONCLOSED',
-        'UNSUBACK': 'UNSUBACK',
-        'UNSUBACK_ALL': 'UNSUBACK'
-    }
-
-    learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-                                               n_sampling=30, print_level=3)
-    learned_onfsm.visualize()
-
 def mqtt_connect_model_single_output():
     """
     Returns:
@@ -382,7 +383,6 @@ def mqtt_connect_model_single_output():
 
     from aalpy.base import SUL
     from aalpy.oracles import RandomWalkEqOracle
-    from aalpy.oracles import RandomWordEqOracle
     from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
     from aalpy.SULs import AutomatonSUL
     from aalpy.utils import load_automaton_from_file
@@ -393,12 +393,10 @@ def mqtt_connect_model_single_output():
 
             mqtt_connect_mealy = load_automaton_from_file('mqtt_connect_model_single_output.dot',
                                                           automaton_type='mealy')
-            #mqtt_connect_mealy.visualize()
             self.mqtt_connect = AutomatonSUL(mqtt_connect_mealy)
             self.connected_clients = set()
 
             self.clients = ('c0', 'c1', 'c2', 'c3', 'c4', 'c5') # Needs to be consistent with .dot file
-            #self.clients = ('c0', 'c1', 'c2', 'c3') # Needs to be consistent with .dot file
 
         def get_input_alphabet(self):
             return ['connect']
@@ -448,9 +446,7 @@ def mqtt_connect_model_single_output():
 
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
                                                n_sampling=50, print_level=3)
-    #learned_onfsm.visualize()
-
-    return learned_onfsm
+    learned_onfsm.visualize()
 
 def mqtt_connect_model():
     """
@@ -461,7 +457,6 @@ def mqtt_connect_model():
 
     from aalpy.base import SUL
     from aalpy.oracles import RandomWalkEqOracle
-    from aalpy.oracles import RandomWordEqOracle
     from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
     from aalpy.SULs import AutomatonSUL
     from aalpy.utils import load_automaton_from_file
@@ -472,11 +467,9 @@ def mqtt_connect_model():
 
             mqtt_connect_mealy = load_automaton_from_file('mqtt_connect_model.dot',
                                                                automaton_type='mealy')
-            #mqtt_connect_mealy.visualize()
             self.mqtt_connect = AutomatonSUL(mqtt_connect_mealy)
             self.connected_clients = set()
 
-            #self.clients = ('c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10', 'c11', 'c12', 'c13', 'c14') # Needs to be consistent with .dot file
             self.clients = ('c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6') # Needs to be consistent with .dot file
 
         def get_input_alphabet(self):
@@ -531,19 +524,9 @@ def mqtt_connect_model():
         'CONCLOSED_ALL': 'CONCLOSED'
     }
 
-    import sys
-    o_temp = sys.stdout
-    with open('output_R.txt', 'w') as f:
-        sys.stdout = f
-        learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
+    learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
                                                n_sampling=50, print_level=3)
-    sys.stdout = o_temp
-
-    #learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-    #                                           n_sampling=50, print_level=3)
-    #learned_onfsm.visualize()
-
-    return learned_onfsm
+    learned_onfsm.visualize()
 
 def mqtt_connect_all_model():
     """
@@ -554,7 +537,6 @@ def mqtt_connect_all_model():
 
     from aalpy.base import SUL
     from aalpy.oracles import RandomWalkEqOracle
-    from aalpy.oracles import RandomWordEqOracle
     from aalpy.learning_algs import run_abstracted_ONFSM_Lstar
     from aalpy.SULs import AutomatonSUL
     from aalpy.utils import load_automaton_from_file
@@ -565,12 +547,10 @@ def mqtt_connect_all_model():
 
             mqtt_connect_mealy = load_automaton_from_file('mqtt_connect_model.dot',
                                                           automaton_type='mealy')
-            #mqtt_connect_mealy.visualize()
             self.mqtt_connect = AutomatonSUL(mqtt_connect_mealy)
             self.connected_clients = set()
 
             self.clients = ('c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6') # Needs to be consistent with .dot file
-            #self.clients = ('c0', 'c1', 'c2', 'c3', 'c4', 'c5') # Needs to be consistent with .dot file
 
         def get_input_alphabet(self):
             return ['connect']
@@ -631,18 +611,9 @@ def mqtt_connect_all_model():
         'CONNACK_ALL': 'CONNACK'
     }
 
-    #import sys
-    #o_temp = sys.stdout
-    #with open('output_R.txt', 'w') as f:
-    #    sys.stdout = f
-    #    learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
-    #                                           n_sampling=50, print_level=3)
-    #sys.stdout = o_temp
-
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
                                                n_sampling=50, print_level=3)
-    #learned_onfsm.visualize()
-    return learned_onfsm
+    learned_onfsm.visualize()
 
 def not_working_onfsm_2_clients_without_dot():
     """
@@ -713,7 +684,6 @@ def not_working_onfsm_2_clients_without_dot():
                                                abstraction_mapping=abstraction_mapping,
                                                n_sampling=50, print_level=3)
     learned_onfsm.visualize()
-    return learned_onfsm
 
 def not_working_onfsm_2_clients_with_dot():
     """
@@ -790,7 +760,6 @@ def not_working_onfsm_2_clients_with_dot():
     learned_onfsm = run_abstracted_ONFSM_Lstar(alphabet, sul, eq_oracle, abstraction_mapping=abstraction_mapping,
                                                n_sampling=200, print_level=3)
     learned_onfsm.visualize()
-    return learned_onfsm
 
 if __name__ == '__main__':
     mqtt_real_example()

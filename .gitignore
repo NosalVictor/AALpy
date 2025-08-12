@@ -138,7 +138,10 @@ dmypy.json
 # Generated files
 mqtt_connect_model.dot
 mqtt_connect_model_single_output.dot
-output.txt
-output_R.txt
-output_T.txt
+output_tables.txt
+SDotA_Cex.txt
+E_Cex.txt
+error.txt
+error_publish.txt
+error_publish_puback.txt
 LearnedModels/

@@ -67,27 +67,20 @@ class AbstractedNonDetObservationTable:
         update_S = self.S + self.S_dot_A
         update_E = self.E
 
-        import sys
-        o_temp = sys.stdout
-        with open('output_T.txt', 'w') as f:
-            sys.stdout = f
-            for s in update_S:
-                for e in update_E:
-                    print("s : ", s, " + e: ", e)
+        for s in update_S:
+            for e in update_E:
+                all_outputs = self.get_all_outputs(s, e)
+                if len(all_outputs) == 0:
+                    self.observation_table.query_missing_observations([s], [e])
                     all_outputs = self.get_all_outputs(s, e)
-                    if len(all_outputs) == 0:
-                        self.observation_table.query_missing_observations([s], [e])
-                        all_outputs = self.get_all_outputs(s, e)
-                    for o_tup in all_outputs:
-                        print("222 s : ", s, " + e: ", e)
-                        abstracted_outputs = []
-                        o_tup = tuple([o_tup])
-                        for outputs in o_tup:
-                            for o in outputs:
-                                abstract_output = self.get_abstraction(o)
-                                abstracted_outputs.append(abstract_output)
-                        self.add_to_T(s, e, tuple(abstracted_outputs))
-        sys.stdout = o_temp
+                for o_tup in all_outputs:
+                    abstracted_outputs = []
+                    o_tup = tuple([o_tup])
+                    for outputs in o_tup:
+                        for o in outputs:
+                            abstract_output = self.get_abstraction(o)
+                            abstracted_outputs.append(abstract_output)
+                    self.add_to_T(s, e, tuple(abstracted_outputs))
 
     def add_to_T(self, s, e, value):
         """
@@ -140,7 +133,6 @@ class AbstractedNonDetObservationTable:
             row_t = self.row_to_hashable(t)
 
             if row_t not in s_rows:
-                #print("row_t: ", row_t, " not in s_rows: ", s_rows)
                 if displacement_included:
                     self.S.append(t)
                     self.S_dot_A.remove(t)
@@ -265,10 +257,8 @@ class AbstractedNonDetObservationTable:
             if hashed_s_row in hashed_rows_from_s:
                 if s in self.S:
                     self.S.remove(s)
-                    print("removing row from S: ", s)
                     if s in self.observation_table.S:
                         self.observation_table.S.remove(s)
-                        print("! REMOVING row from observation table S: ", s)
                     #self.observation_table.S.remove(s)
                 size = len(s[0])
                 for row_prefix in tmp_both_S:
@@ -276,11 +266,9 @@ class AbstractedNonDetObservationTable:
                     if s != row_prefix and s == s_both_row:
                         if row_prefix in self.S:
                             self.S.remove(row_prefix)
-                            print("second removing row from S: ", row_prefix)
                             #self.observation_table.S.remove(s)
                             if s in self.observation_table.S:
                                 self.observation_table.S.remove(s)
-                                print("! SECOND REMOVING row from observation table S: ", s)
             else:
                 hashed_rows_from_s.add(hashed_s_row)
 
@@ -300,8 +288,6 @@ class AbstractedNonDetObservationTable:
         """
         row_repr = tuple()
         for e in self.E:
-            if e not in self.T[row_prefix].keys():
-                print("row prefix: ", row_prefix, " does not have e: ", e)
             row_repr += (frozenset(self.T[row_prefix][e]),)
         return row_repr
 
@@ -369,7 +355,6 @@ class AbstractedNonDetObservationTable:
         prefixes_to_extend = []
         for cex_prefix in cex_prefixes:
             if cex_prefix not in prefixes:
-                print("adding cex prefix to S_dot_A: ", cex_prefix)
                 prefixes_to_extend.append(cex_prefix)
                 self.S_dot_A.append(cex_prefix)
         return prefixes_to_extend
@@ -420,18 +405,13 @@ class AbstractedNonDetObservationTable:
 
         if equivalent_output:
             o = sys.stdout
-
-            with open('SDotA.txt', 'w') as f:
+            with open('SDotA_Cex.txt', 'w') as f:
                 sys.stdout = f
-
-                print("equivalent output found, adding prefixes to S_dot_A")
-                print("possible outputs: ", possible_outputs)
-                print("cex output: ", cex[1][cex_len - 1])
-
+                print("Counterexample : ", cex)
+                print("Equivalent output found, adding prefixes to S_dot_A")
+                print("Possible outputs: ", possible_outputs)
+                print("Cex output: ", cex[1][cex_len - 1])
             sys.stdout = o
-            print("equivalent output found, adding prefixes to S_dot_A")
-            print("possible outputs: ", possible_outputs)
-            print("cex output: ", cex[1][cex_len - 1])
             # add prefixes of cex to S_dot_A
             cex_prefixes = [(tuple(cex[0][0:i + 1]), tuple(cex[1][0:i + 1])) for i in range(0, len(cex[0]))]
             prefixes_to_extend = self.extend_S_dot_A(cex_prefixes)
@@ -440,28 +420,23 @@ class AbstractedNonDetObservationTable:
             # self.observation_table.S_dot_A.extend(prefixes_to_extend)
             self.update_obs_table(s_set=prefixes_to_extend)
         else:
-            print("no equivalent output found, adding suffixes to E")
-            print("possible outputs: ", possible_outputs)
-            print("cex output: ", cex[1][cex_len - 1])
             # add distinguishing suffixes of cex to E
             # CHANGED CEX PROX
             # TODO: this will now not work as cex processing was changed
             # cex_suffixes = non_det_longest_prefix_cex_processing(self.observation_table, cex)
             cex_suffixes = all_suffixes(cex[0])
-            print("cex suffixes length: ", len(cex_suffixes))
             #added_suffixes = extend_set(self.observation_table.E, cex_suffixes)
             for suffix in cex_suffixes[1:]:
                 added_suffix = extend_set(self.E, [suffix])
                 if len(added_suffix) > 0:
-                    print("ADDED SUFFIX: ", added_suffix)
-
                     o = sys.stdout
-                    with open('E.txt', 'w') as f:
+                    with open('E_Cex.txt', 'w') as f:
                         sys.stdout = f
-                        print("equivalent output found, adding prefixes to S_dot_A")
-                        print("possible outputs: ", possible_outputs)
-                        print("cex output: ", cex[1][cex_len - 1])
-                        print("ADDED SUFFIX: ", added_suffix)
+                        print("Counterexample : ", cex)
+                        print("No equivalent output found, adding suffixes to E")
+                        print("Possible outputs: ", possible_outputs)
+                        print("Cex output: ", cex[1][cex_len - 1])
+                        print("Added Suffix: ", added_suffix)
                     sys.stdout = o
 
                     self.update_obs_table(s_set=self.S_dot_A, e_set=added_suffix)

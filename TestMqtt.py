@@ -57,7 +57,7 @@ def send_unsubscribe(sock):
     topic = mqtt.MQTTTopic(topic="test")
     mqtt_unsub.add_payload(mqtt.MQTTUnsubscribe(msgid=1, topics=[topic]))
     sock.sendall(raw(mqtt_unsub))
-    print("c0 sent UNSUBSCRIBE : ", raw(mqtt_unsub).hex())
+    print("sent UNSUBSCRIBE : ", raw(mqtt_unsub).hex())
 
     response = sock.recv(4)
     if response == b'':
@@ -187,12 +187,20 @@ def publish_first_with_other_client_sub(sock0):
     sock1.close()
     return False
 
+want_bug_search = False
+
 if __name__ == "__main__":
-    bug_found = False
-    while not bug_found:
+    if want_bug_search:
+        bug_found = False
+        while not bug_found:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(server_address)
+            bug_found = publish_first_with_other_client_sub(s)
+            s.close()
+            print("==============================================")
+        print("Bug Found")
+    else:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect(server_address)
-        bug_found = publish_first_with_other_client_sub(s)
+        triple_connect(s)
         s.close()
-        print("==============================================")
-    print("Bug Found : Forgot to read PUBLISH")
