@@ -85,6 +85,29 @@ def get_ONFSM():
 
     return Onfsm(q0, [q0, q1, q2, q3, q4, q5, q6, q7, q8])
 
+def get_N_Plus_One_ONFSM():
+    """
+    Returns example of an ONFSM.
+    """
+    from aalpy.automata import Onfsm, OnfsmState
+
+    q0 = OnfsmState('q0')
+    q1 = OnfsmState('q1')
+    q2 = OnfsmState('q2')
+
+    q0.transitions['c0_connect'].append(('c0_CONNACK__c1_CONCLOSED', q1))
+    q0.transitions['c1_connect'].append(('c0_CONCLOSED__c1_CONNACK', q1))
+
+    q1.transitions['c0_connect'].append(('c0_CONCLOSED__c1_CONCLOSED', q0))
+    q1.transitions['c1_connect'].append(('c0_CONCLOSED__c1_CONCLOSED', q0))
+
+    q1.transitions['c0_connect'].append(('c0_CONNACK__c1_Empty', q2))
+    q1.transitions['c1_connect'].append(('c0_Empty__c1_CONNACK', q2))
+
+    q2.transitions['c0_connect'].append(('c0_CONCLOSED__c1_Empty', q1))
+    q2.transitions['c1_connect'].append(('c0_Empty__c1_CONCLOSED', q1))
+
+    return Onfsm(q0, [q0, q1, q2])
 
 def get_faulty_coffee_machine_MDP():
     from aalpy.automata import Mdp, MdpState

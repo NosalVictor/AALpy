@@ -1,3 +1,4 @@
+import sys
 from collections import defaultdict
 
 from aalpy.automata import Onfsm, OnfsmState
@@ -68,7 +69,11 @@ class AbstractedNonDetObservationTable:
 
         for s in update_S:
             for e in update_E:
-                for o_tup in self.get_all_outputs(s, e):
+                all_outputs = self.get_all_outputs(s, e)
+                if len(all_outputs) == 0:
+                    self.observation_table.query_missing_observations([s], [e])
+                    all_outputs = self.get_all_outputs(s, e)
+                for o_tup in all_outputs:
                     abstracted_outputs = []
                     o_tup = tuple([o_tup])
                     for outputs in o_tup:
@@ -112,7 +117,7 @@ class AbstractedNonDetObservationTable:
         """
         return self.observation_table.get_extended_S(row_prefix=row_prefix)
 
-    def get_row_to_close(self):
+    def get_row_to_close(self, displacement_included=True):
         """
         Get row for that needs to be closed.
 
@@ -128,8 +133,9 @@ class AbstractedNonDetObservationTable:
             row_t = self.row_to_hashable(t)
 
             if row_t not in s_rows:
-                self.S.append(t)
-                self.S_dot_A.remove(t)
+                if displacement_included:
+                    self.S.append(t)
+                    self.S_dot_A.remove(t)
                 return t
 
         return None
@@ -251,14 +257,18 @@ class AbstractedNonDetObservationTable:
             if hashed_s_row in hashed_rows_from_s:
                 if s in self.S:
                     self.S.remove(s)
-                    self.observation_table.S.remove(s)
+                    if s in self.observation_table.S:
+                        self.observation_table.S.remove(s)
+                    #self.observation_table.S.remove(s)
                 size = len(s[0])
                 for row_prefix in tmp_both_S:
                     s_both_row = (row_prefix[0][:size], row_prefix[1][:size])
                     if s != row_prefix and s == s_both_row:
                         if row_prefix in self.S:
                             self.S.remove(row_prefix)
-                            self.observation_table.S.remove(s)
+                            #self.observation_table.S.remove(s)
+                            if s in self.observation_table.S:
+                                self.observation_table.S.remove(s)
             else:
                 hashed_rows_from_s.add(hashed_s_row)
 
@@ -278,7 +288,6 @@ class AbstractedNonDetObservationTable:
         """
         row_repr = tuple()
         for e in self.E:
-            # if e in self.T[row_prefix].keys():
             row_repr += (frozenset(self.T[row_prefix][e]),)
         return row_repr
 
@@ -395,6 +404,14 @@ class AbstractedNonDetObservationTable:
                 break
 
         if equivalent_output:
+            o = sys.stdout
+            with open('SDotA_Cex.txt', 'w') as f:
+                sys.stdout = f
+                print("Counterexample : ", cex)
+                print("Equivalent output found, adding prefixes to S_dot_A")
+                print("Possible outputs: ", possible_outputs)
+                print("Cex output: ", cex[1][cex_len - 1])
+            sys.stdout = o
             # add prefixes of cex to S_dot_A
             cex_prefixes = [(tuple(cex[0][0:i + 1]), tuple(cex[1][0:i + 1])) for i in range(0, len(cex[0]))]
             prefixes_to_extend = self.extend_S_dot_A(cex_prefixes)
@@ -408,9 +425,25 @@ class AbstractedNonDetObservationTable:
             # TODO: this will now not work as cex processing was changed
             # cex_suffixes = non_det_longest_prefix_cex_processing(self.observation_table, cex)
             cex_suffixes = all_suffixes(cex[0])
+            #added_suffixes = extend_set(self.observation_table.E, cex_suffixes)
+            for suffix in cex_suffixes[1:]:
+                added_suffix = extend_set(self.E, [suffix])
+                if len(added_suffix) > 0:
+                    o = sys.stdout
+                    with open('E_Cex.txt', 'w') as f:
+                        sys.stdout = f
+                        print("Counterexample : ", cex)
+                        print("No equivalent output found, adding suffixes to E")
+                        print("Possible outputs: ", possible_outputs)
+                        print("Cex output: ", cex[1][cex_len - 1])
+                        print("Added Suffix: ", added_suffix)
+                    sys.stdout = o
 
-            added_suffixes = extend_set(self.observation_table.E, cex_suffixes)
-            self.update_obs_table(e_set=added_suffixes)
+                    self.update_obs_table(s_set=self.S_dot_A, e_set=added_suffix)
+                    if self.get_row_to_close(displacement_included=False) is not None:
+                        break
+
+            #self.update_obs_table(e_set=added_suffixes)
 
     def clean_tables(self):
 

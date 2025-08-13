@@ -171,17 +171,23 @@ class TraceTree:
     def get_s_e_sampling_frequency(self, prefix, suffix):
         sampling_frequency = 0
         curr_node = self.root_node
+        print(f"Prefix: {prefix} + Suffix: {suffix}")
         for i, o in zip(prefix[0], prefix[1]):
             curr_node = curr_node.get_child(i, o)
             if curr_node is None:
+                print(f"Prefix path broken at: input={i}, output={o}")
                 return 0
 
         queue = [(curr_node, 0)]
         while queue:
             node, depth = queue.pop(0)
             children_with_same_input = node.children[suffix[depth]]
+            if not children_with_same_input:
+                print(f"No children at depth {depth} for input: {suffix[depth]}")
+                continue
             if depth == len(suffix) - 1:
                 for c in children_with_same_input:
+                    print(f"Leaf node found: freq={c.frequency_counter}")
                     sampling_frequency += c.frequency_counter
             else:
                 for c in children_with_same_input:
