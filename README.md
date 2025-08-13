@@ -2,7 +2,7 @@
 
 AALpy est une librairie Python permettant d'apprendre le fonctionnement de systèmes via plusieurs algorithmes.
 
-Ce projet est un fork de la librairie AALpy implémentant un cas d'étude pour le mémoire ***Apprentissage d’automates avec abstraction de l’alphabet***.
+Ce projet est un fork de la librairie AALpy, implémentant un cas d'étude pour le mémoire ***Apprentissage d’automates avec abstraction de l’alphabet***.
 
 Le wiki du projet originel peut être trouvé à l'adresse :
 - <https://github.com/DES-Lab/AALpy/wiki>

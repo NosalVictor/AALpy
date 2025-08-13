@@ -226,9 +226,9 @@ def mqtt_real_example(): #Main function to run the learning algorithm
                                                n_sampling=21, print_level=3)
     learned_onfsm.visualize()
 
-#############################################################################################
-# From here on, the mappers and functions have been used for testing throughout development #
-#############################################################################################
+###############################################################################################
+## From here on, the mappers and functions have been used for testing throughout development ##
+###############################################################################################
 
 class HiveMQ_Mapper_Con_Discon(SUL): #Mapper for connect and disconnect only
     def __init__(self, broker='localhost', port=1883):
